@@ -1,0 +1,13 @@
+funções necessarias para a implementação pra desenhar a logo da IBM
+
+00E0 (CLS - Clear Screen): 
+
+1NNN (JMP - Jump):
+
+6XNN (LD VX, NN - Load Register):
+
+7XNN (ADD VX, NN - Add to Register):
+
+ANNN (LD I, NNN - Load Index Register):
+
+DXYN (DRW Vx, Vy, N - Draw Sprite):
