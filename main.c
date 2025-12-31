@@ -31,6 +31,9 @@ typedef struct{
     uint8_t display[64 *32];
     uint8_t Soundtimer;
     uint8_t Delaytimer;
+    uint32_t last_timer_tick;
+    int waitkey;
+    uint8_t wait_reg;
     uint16_t PC;
     uint16_t opcode;
     uint16_t stack[16];
@@ -49,10 +52,6 @@ typedef struct{
 }Chip8State;
 
 Chip8State chip;
-
-
-
-
 
     //gambiarra de variaveis globais
     unsigned int Start_Address = 0x200;
@@ -79,6 +78,35 @@ Chip8State chip;
 	0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 
     };
+
+    int keymap(SDL_Keycode key){
+
+        switch(key){
+
+        case SDLK_1: return 0x1;
+        case SDLK_2: return 0x2;
+        case SDLK_3: return 0x3;
+        case SDLK_4: return 0xC;
+
+        case SDLK_q: return 0x4;
+        case SDLK_w: return 0x5;
+        case SDLK_e: return 0x6;
+        case SDLK_r: return 0xD;
+
+        case SDLK_a: return 0x7;
+        case SDLK_s: return 0x8;
+        case SDLK_d: return 0x9;
+        case SDLK_f: return 0xE;
+
+        case SDLK_z: return 0xA;
+        case SDLK_x: return 0x0;
+        case SDLK_c: return 0xB;
+        case SDLK_v: return 0xF;
+
+        default: return -1;
+        }
+
+    }
 
 
     int ROM_loader(const char *file){
@@ -117,6 +145,10 @@ Chip8State chip;
         chip.PC = Start_Address;
         chip.SP = &chip.stack[0];
         chip.I = 0;
+        chip.Delaytimer = 0;
+        chip.Soundtimer = 0;
+        chip.last_timer_tick = SDL_GetTicks();
+        srand(time(0));
 
         //load font
         for(unsigned int i = 0; i < FONTSET_SIZE; i++){
@@ -247,6 +279,7 @@ Chip8State chip;
     }
     void handle_input(Chip8State *chip){
         SDL_Event event;
+        int key = keymap(event.key.keysym.sym);
 
         while(SDL_PollEvent(&event)){
             switch(event.type){
@@ -256,28 +289,55 @@ Chip8State chip;
                 return;
 
                 case SDL_KEYDOWN:
-                    switch(event.key.keysym.sym){
-                        case SDLK_ESCAPE:
+                    SDL_Keycode sym = event.key.keysym.sym;
+                    
+                    if(sym == SDLK_ESCAPE){
                         chip->RUNNING = 0;
-                        return;
-
-                case SDLK_SPACE:
-                        chip->PAUSED = !chip->PAUSED;
-                            printf("pausado\n");
-                            break;
+                        break;
                     }
-                    break;
+                    if(sym == SDLK_SPACE){
+                        chip->PAUSED = !chip->PAUSED;
+                        printf("pausado\n");
+                        break;
+                    }
+                if(key != -1){
+                    chip->keyboard[key] = 1;
+                }
+                if(chip->waitkey){
+                    chip->V[chip->wait_reg] = key;
+                    chip->waitkey = 0;
+                }
+                break;
                 case SDL_KEYUP:
+                if(key != -1){
+                    chip->keyboard[key] = 0;
+                }
+                break;
             }
         }
-
     }
+    
+    void get_time(Chip8State *chip){
+
+        uint32_t now = SDL_GetTicks();
+
+        if(now - chip->last_timer_tick >= 16){
+            
+            if(chip->Delaytimer > 0){
+                chip->Delaytimer--;
+            }
+            if(chip->Soundtimer > 0){
+                chip->Soundtimer--;
+            }
+            chip->last_timer_tick = now;
+        }
+    }
+    
     //EMULATE CHIP-8 INSTRUCTIONS
     void instructions(Chip8State *chip){
 
         //get next opcode from RAM
         chip->opcode = chip->memory[chip->PC] << 8 | chip->memory[chip->PC+1];
-        chip->PC +=2; //Pre-increment program counter for next opcode
         
         //Fill out current instruction Format
         //DXYN
@@ -287,6 +347,8 @@ Chip8State chip;
         chip->X = (chip->opcode >> 8) & 0x0F;
         chip->Y = (chip->opcode >> 4) & 0x0F;
         printf("\nAddress: 0x%04X, opcode: 0x%04X, Desc:", chip->PC-2, chip->opcode);
+
+        chip->PC +=2; //Pre-increment program counter for next opcode
 
         //Emulate Opcode
         switch((chip->opcode >> 12) & 0x0F){
@@ -300,7 +362,7 @@ Chip8State chip;
                     //Set last address from subroutine stack
                     printf("Return from subroutine to address 0x%04X\n", *(chip->SP -1));
                     chip->PC = *--chip->SP;
-                }else if(chip->opcode == 0x0000){
+                }else if(chip->opcode == 0x00){
                     //NOP memoria vazia
                 }
                 else{
@@ -332,7 +394,7 @@ Chip8State chip;
                 }
                 break;
             case 0x05:
-                if(chip->V[chip->X] == chip->V[chip->Y]){
+                if(chip->N == 0 && chip->V[chip->X] == chip->V[chip->Y]){
                     printf("Skip next instruction if Vx = Vy.\n");
                     chip->PC += 2;
                 }
@@ -345,9 +407,86 @@ Chip8State chip;
                 printf("Set Vx = Vx + kk.\n");
                 chip->V[chip->X] = (chip->V[chip->X] + chip->NN);
                 break;
+            case 0x08:
+                if(chip->N == 0x0){
+                    chip->V[chip->X] = chip->V[chip->Y];
+                }
+                else if(chip->N == 0x1){
+                    chip->V[chip->X] |= chip->V[chip->Y];
+                }
+                else if(chip->N == 0x2){
+                    chip->V[chip->X] &= chip->V[chip->Y];
+                }
+                else if(chip->N == 0x3){
+                    chip->V[chip->X] ^= chip->V[chip->Y];
+                }
+                else if(chip->N == 0x4){
+                    uint16_t sum;
+                    sum = chip->V[chip->Y] + chip->V[chip->X];
+                    chip->V[0xF] = (sum > 0xFF);
+                    chip->V[chip->X] = sum & 0xFF;
+                }
+                else if(chip->N == 0x5){
+                    chip->V[0xF] = (chip->V[chip->X] >= chip->V[chip->Y]);
+                    chip->V[chip->X] -= chip->V[chip->Y];
+                }
+                else if(chip->N == 0x6){
+                    chip->V[0xF] = chip->V[chip->X] &0x01;
+                    chip->V[chip->X] >>= 1;
+                }
+                else if(chip->N == 0x7){
+                    chip->V[0xF] = chip->V[chip->Y] >= chip->V[chip->X];
+                    chip->V[chip->X] = chip->V[chip->Y] - chip->V[chip->X];
+                }
+                else if(chip->N == 0xE){
+                    chip->V[0xF] = (chip->V[chip->X] & 0x80) >> 7;
+                    chip->V[chip->X] <<= 1;
+                }
+                break;
+            case 0x9:
+                if(chip->N == 0x0 && chip->V[chip->X] != chip->V[chip->Y]){
+                    chip->PC += 2;
+                }
+                break;
+
+            case 0xE:
+                if(chip->keyboard[chip->V[chip->X]]){
+                    chip->PC +=2;
+                }
+                break;
+            case 0xA1:
+                if(!chip->keyboard[chip->V[chip->X]]){
+                    chip->PC +=2;
+                }
+                break;
+            case 0x0F:
+                if(chip->N == 0x7){
+                    chip->V[chip->X] = chip->Delaytimer;
+                }
+                else if(chip->N == 0x15){
+                    chip->Delaytimer = chip->V[chip->X];
+                }
+                else if(chip->N == 0x18){
+                    chip->Soundtimer = chip->V[chip->X];
+                }
+                else if(chip->N == 0x0A){
+                    chip->waitkey = 1;
+                    chip->wait_reg = chip->X; 
+
+                    if(chip->waitkey){
+                        return;
+                    }
+                }
+            case 0x0C:
+                printf("Sets VX a random number\n");
+                chip->V[chip->X] = (rand() % 256) & chip->NN;
+                break;
             case 0x0A:
                 printf("Sets I to the address NNN.\n");
                 chip->I = chip->NNN;
+                break;
+            case 0x0B:
+                chip->PC = (chip->V[0x0] + chip->NNN);
                 break;
             case 0x0D:
                 uint8_t x = chip->V[chip->X] % chip->gfx.window_width;
@@ -383,8 +522,6 @@ Chip8State chip;
             default:
                 printf("Not implemented yet or invalid opcode\n");
                     break;
-
-
         }
     }
 
@@ -394,7 +531,40 @@ Chip8State chip;
         srand(time(NULL));
 
         
-        const char *arquivo = "Chip8 Picture.ch8";
+        int op;
+        const char *arquivo = "";
+
+        printf("Chose what ROM you want To Test:\n");
+        printf("1-IBM Test Logo\n");
+        printf("2-Opcode Test\n");
+        printf("3-CHIP-8 Logo\n");
+        printf("4-Random Number Test\n");
+        printf("5-Space Invaders\n");
+        printf("6-Pong\n");
+        printf("-> ");
+        scanf("%d", &op);
+
+        if(op == 1){
+            arquivo = "IBM Logo.ch8";
+        }
+        else if(op == 2){
+            arquivo = "test_opcode.ch8";
+        }
+        else if(op == 3){
+            arquivo = "Chip8 Picture.ch8";
+        }
+        else if(op == 4){
+           arquivo = "random_number_test.ch8";
+        }
+        else if(op == 5){
+            arquivo = "Space Invaders [David Winter].ch8";
+        }
+        else if(op == 6){
+            arquivo = "Pong [Paul Vervalin, 1990].ch8";
+        }
+        else{
+            printf("estranho\n");
+        }
 
         initChip8();
         ROM_loader(arquivo);
@@ -416,13 +586,13 @@ Chip8State chip;
 
             if(chip.PAUSED == 1) continue;
 
-            //get_time();
+            get_time(&chip);
 
             //Emulate CHIP8 Instructions
             instructions(&chip);
             //get_time();
             //Delay for approximately 60hz
-            SDL_Delay(16);
+            SDL_Delay(1);
             //Update window with changes 
             update_screen(sdl, config, chip);
 
