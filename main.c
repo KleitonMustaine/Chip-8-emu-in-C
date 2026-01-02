@@ -79,36 +79,6 @@ Chip8State chip;
 
     };
 
-    int keymap(SDL_Keycode key){
-
-        switch(key){
-
-        case SDLK_1: return 0x1;
-        case SDLK_2: return 0x2;
-        case SDLK_3: return 0x3;
-        case SDLK_4: return 0xC;
-
-        case SDLK_q: return 0x4;
-        case SDLK_w: return 0x5;
-        case SDLK_e: return 0x6;
-        case SDLK_r: return 0xD;
-
-        case SDLK_a: return 0x7;
-        case SDLK_s: return 0x8;
-        case SDLK_d: return 0x9;
-        case SDLK_f: return 0xE;
-
-        case SDLK_z: return 0xA;
-        case SDLK_x: return 0x0;
-        case SDLK_c: return 0xB;
-        case SDLK_v: return 0xF;
-
-        default: return -1;
-        }
-
-    }
-
-
     int ROM_loader(const char *file){
 
         memset(chip.memory,0, sizeof chip.memory);
@@ -149,6 +119,8 @@ Chip8State chip;
         chip.Soundtimer = 0;
         chip.last_timer_tick = SDL_GetTicks();
         srand(time(0));
+        memset(chip.display,0,sizeof chip.display);
+        memset(chip.keyboard,0,sizeof chip.keyboard);
 
         //load font
         for(unsigned int i = 0; i < FONTSET_SIZE; i++){
@@ -168,6 +140,34 @@ Chip8State chip;
         }
 
         return 0;
+
+    }
+       int keymap(SDL_Keycode key){
+
+        switch(key){
+
+        case SDLK_1: return 0x1;
+        case SDLK_2: return 0x2;
+        case SDLK_3: return 0x3;
+        case SDLK_4: return 0xC;
+
+        case SDLK_q: return 0x4;
+        case SDLK_w: return 0x5;
+        case SDLK_e: return 0x6;
+        case SDLK_r: return 0xD;
+
+        case SDLK_a: return 0x7;
+        case SDLK_s: return 0x8;
+        case SDLK_d: return 0x9;
+        case SDLK_f: return 0xE;
+
+        case SDLK_z: return 0xA;
+        case SDLK_x: return 0x0;
+        case SDLK_c: return 0xB;
+        case SDLK_v: return 0xF;
+
+        default: return -1;
+        }
 
     }
 
@@ -279,9 +279,9 @@ Chip8State chip;
     }
     void handle_input(Chip8State *chip){
         SDL_Event event;
-        int key = keymap(event.key.keysym.sym);
 
         while(SDL_PollEvent(&event)){
+            int key = keymap(event.key.keysym.sym);
             switch(event.type){
                 case SDL_QUIT:
                 //exit
@@ -289,6 +289,7 @@ Chip8State chip;
                 return;
 
                 case SDL_KEYDOWN:
+ 
                     SDL_Keycode sym = event.key.keysym.sym;
                     
                     if(sym == SDLK_ESCAPE){
@@ -303,7 +304,7 @@ Chip8State chip;
                 if(key != -1){
                     chip->keyboard[key] = 1;
                 }
-                if(chip->waitkey){
+                if(chip->waitkey && key != -1){
                     chip->V[chip->wait_reg] = key;
                     chip->waitkey = 0;
                 }
@@ -321,7 +322,7 @@ Chip8State chip;
 
         uint32_t now = SDL_GetTicks();
 
-        if(now - chip->last_timer_tick >= 16){
+        if(now - chip->last_timer_tick >= 1000/60){
             
             if(chip->Delaytimer > 0){
                 chip->Delaytimer--;
@@ -370,44 +371,44 @@ Chip8State chip;
                 }
                 break;
 
-                case 0x01:
+                case 0x1:
                 //1NNN: just jump to the NNN Address
                 chip->PC = chip->NNN;
                 break;
-            case 0x02:
+            case 0x2:
                 //0x2NNN: Call subroutine at NNN
                 //Store current address to return to subroutine Stack
                 printf("Call subroutine at nnn.\n");
                 *chip->SP++ = chip->PC; 
                 chip->PC = chip->NNN;
                 break;
-            case 0x03:
+            case 0x3:
                 if(chip->V[chip->X] == chip->NN){
                     printf("Skip next instruction if Vx = kk.\n");
                     chip->PC += 2;
                 }
                 break;
-            case 0x04:
+            case 0x4:
                 if(chip->V[chip->X] != chip->NN){
                     printf("Skip next instruction if Vx != kk.\n");
                     chip->PC += 2;
                 }
                 break;
-            case 0x05:
+            case 0x5:
                 if(chip->N == 0 && chip->V[chip->X] == chip->V[chip->Y]){
                     printf("Skip next instruction if Vx = Vy.\n");
                     chip->PC += 2;
                 }
                 break;
-            case 0x06:
+            case 0x6:
                 printf("Set Vx = kk.\n");
                 chip->V[chip->X] = chip->NN;
                 break;
-            case 0x07:
+            case 0x7:
                 printf("Set Vx = Vx + kk.\n");
                 chip->V[chip->X] = (chip->V[chip->X] + chip->NN);
                 break;
-            case 0x08:
+            case 0x8:
                 if(chip->N == 0x0){
                     chip->V[chip->X] = chip->V[chip->Y];
                 }
@@ -450,45 +451,72 @@ Chip8State chip;
                 break;
 
             case 0xE:
-                if(chip->keyboard[chip->V[chip->X]]){
-                    chip->PC +=2;
+                if(chip->NN ==0x9E){
+                    if(chip->keyboard[chip->V[chip->X]]){
+                        chip->PC +=2;
                 }
-                break;
-            case 0xA1:
-                if(!chip->keyboard[chip->V[chip->X]]){
-                    chip->PC +=2;
+            }
+            else if(chip->NN == 0xA1){
+                    if(!chip->keyboard[chip->V[chip->X]]){
+                        chip->PC +=2;
                 }
+            }
                 break;
-            case 0x0F:
-                if(chip->N == 0x7){
+            case 0xF:
+                if(chip->NN == 0x7){
                     chip->V[chip->X] = chip->Delaytimer;
                 }
-                else if(chip->N == 0x15){
+                else if(chip->NN == 0x15){
                     chip->Delaytimer = chip->V[chip->X];
                 }
-                else if(chip->N == 0x18){
+                else if(chip->NN == 0x18){
                     chip->Soundtimer = chip->V[chip->X];
                 }
-                else if(chip->N == 0x0A){
+                else if(chip->NN == 0x0A){
                     chip->waitkey = 1;
                     chip->wait_reg = chip->X; 
-
-                    if(chip->waitkey){
-                        return;
+                    chip->PC -=2;
+                    return;
+                    
+                }
+                else if(chip->NN == 0x1E){
+                    chip->I += chip->V[chip->X];
+                }
+                else if(chip->NN == 0x29){
+                    chip->I = FONTSET_START_ADDRESS + (chip->V[chip->X]*5);
+                }
+                else if(chip->NN == 0x33){
+                    uint8_t v= chip->V[chip->X];
+                    chip->memory[chip->I] = v/100;
+                    chip->memory[chip->I + 1] = (v /10) % 10;
+                    chip->memory[chip->I + 2] = v % 10;
+                }
+                else if(chip->NN == 0x55){
+                    for(int i =0; i<=chip->X; i++){
+                        chip->memory[chip->I + i] = chip->V[i];
                     }
                 }
-            case 0x0C:
-                printf("Sets VX a random number\n");
-                chip->V[chip->X] = (rand() % 256) & chip->NN;
+                else if(chip->NN == 0x65){
+                    for(int i =0; i<=chip->X; i++){
+                        chip->V[i] = chip->memory[chip->I + i];
+                    }
+                }
                 break;
-            case 0x0A:
+            case 0xC:
+                printf("Sets VX a random number\n");
+                chip->V[chip->X] = (rand() % 0xFF) & chip->NN;
+                break;
+            case 0xA:
                 printf("Sets I to the address NNN.\n");
                 chip->I = chip->NNN;
                 break;
-            case 0x0B:
+            case 0xB:
                 chip->PC = (chip->V[0x0] + chip->NNN);
                 break;
-            case 0x0D:
+            //Super Chip-8 instructions
+            
+            
+            case 0xD:
                 uint8_t x = chip->V[chip->X] % chip->gfx.window_width;
                 uint8_t y = chip->V[chip->Y] % chip->gfx.window_heigh;
                 uint8_t H = chip->N;
@@ -590,10 +618,11 @@ Chip8State chip;
 
             //Emulate CHIP8 Instructions
             instructions(&chip);
-            //get_time();
+            get_time(&chip);
             //Delay for approximately 60hz
             SDL_Delay(1);
             //Update window with changes 
+            clear_window(config, sdl);
             update_screen(sdl, config, chip);
 
         }
