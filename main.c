@@ -20,13 +20,18 @@ typedef struct{
     uint32_t fg_color;  
     uint32_t bg_color;
     uint32_t scale_factor;
-    uint8_t pixel;
+    uint8_t pixel;  
+    uint32_t audio_sample_rate; //44100 Hz
+    uint32_t square_wave_freq; //440 Hz
+    int16_t volume; //volume
 
 }config_t;
 
 typedef struct{
     SDL_Window *window;
     SDL_Renderer *renderer;
+    SDL_AudioSpec want, have;
+    SDL_AudioDeviceID dev;
 } sdl_t;
 
 typedef struct{
@@ -205,6 +210,24 @@ Chip8State chip;
 
     }
 
+    void audio_callback(void *userdata, uint8_t *stream, int len){
+        config_t *config = (config_t *)userdata;
+
+        int16_t *audio_data = (int16_t *)stream;
+        static uint32_t running_sample_index = 0;
+
+        const int32_t square_wave_period = config->audio_sample_rate / config->square_wave_freq;
+        const int32_t half_period = square_wave_period / 2;
+
+        for(int i = 0; i < len / 2; i++){
+           audio_data[i] = ((running_sample_index++ / square_wave_period) % 2) ? config->volume : -config->volume;
+        
+
+        }
+
+    }
+
+
     bool init_SDL(sdl_t *sdl, const config_t config ){
 
         if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0){
@@ -222,6 +245,20 @@ Chip8State chip;
         sdl->renderer = SDL_CreateRenderer(sdl->window, -1, SDL_RENDERER_ACCELERATED);
         if(!sdl->renderer){
             SDL_Log("Nao foi possivel criar o renderer do SDL %s\n", SDL_GetError());
+            return false;
+        }
+
+        sdl->want = (SDL_AudioSpec){
+            .freq = config.audio_sample_rate,
+            .format = AUDIO_S16SYS,
+            .channels = 1,
+            .samples = 2048,
+            .callback = audio_callback,
+            .userdata = (void *)&chip.gfx
+        };
+        sdl->dev = SDL_OpenAudioDevice(NULL, 0, &sdl->want, NULL, 0);
+        if(sdl->dev == 0){
+            SDL_Log("Nao foi possivel abrir o dispositivo de audio: %s\n", SDL_GetError());
             return false;
         }
 
@@ -250,6 +287,7 @@ Chip8State chip;
     
     void CleanupSDL(const sdl_t *sdl){
 
+        SDL_CloseAudioDevice(sdl->dev);
         SDL_DestroyRenderer(sdl->renderer);
         SDL_DestroyWindow(sdl->window);
         SDL_Quit();
@@ -639,6 +677,13 @@ Chip8State chip;
             //Emulate CHIP8 Instructions
             instructions(&chip);
             get_time(&chip);
+            //toca o audio se o timer de som estiver ativo
+            if(chip.Soundtimer > 0){
+                SDL_PauseAudioDevice(sdl.dev, 0); // 0 = tocando
+            }
+            else{
+                SDL_PauseAudioDevice(sdl.dev, 1); // 1 = pausado
+            }
             //Delay for approximately 60hz
             SDL_Delay(1);
             //Update window with changes 
