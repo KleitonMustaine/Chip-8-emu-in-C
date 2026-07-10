@@ -4,8 +4,14 @@
 #include <stdint.h>
 #include <time.h>
 #include <stdbool.h>
+#include <string.h>
+#include <dirent.h>
 
 #define FONTSET_SIZE 80
+#define ROMS_DIR "Roms"
+#define MAX_ROMS 256
+#define MAX_NAME 256
+
 
 typedef struct{
     
@@ -79,13 +85,41 @@ Chip8State chip;
 
     };
 
+    int scan_roms(char lista[MAX_ROMS][MAX_NAME]) {
+        DIR *dir = opendir(ROMS_DIR);
+        if(dir == NULL){
+            printf("Nao foi possivel abrir o diretorio de ROMs\n");
+            return 0;
+        }
+
+        int count = 0;
+        struct dirent *entry;
+
+        while((entry = readdir(dir)) != NULL && count < MAX_ROMS){
+
+            const char *ext = strrchr(entry->d_name, '.');
+
+            if(ext != NULL && strcmp(ext, ".ch8") == 0){
+                strncpy(lista[count], entry->d_name, MAX_NAME);
+                lista[count][MAX_NAME - 1] = '\0';
+                count++;
+            }
+
+        }
+        closedir(dir);
+        return count;
+    }
+
     int ROM_loader(const char *file){
 
         memset(chip.memory,0, sizeof chip.memory);
 
+        char caminho[512];
+        snprintf(caminho, sizeof caminho, "%s/%s", ROMS_DIR, file);
+
         FILE *ROM;
 
-        ROM= fopen(file,"rb");
+        ROM = fopen(caminho,"rb");
 
         if(ROM == NULL){
 
@@ -561,41 +595,27 @@ Chip8State chip;
         
         int op;
         const char *arquivo = "";
+        char roms[MAX_ROMS][MAX_NAME];
+        int total = scan_roms(roms);
+
+        if(total == 0){
+            printf("Nao foram encontrados arquivos .ch8 no diretorio %s\n", ROMS_DIR);
+        }
 
         printf("Chose what ROM you want To Test:\n");
-        printf("1-IBM Test Logo\n");
-        printf("2-Opcode Test\n");
-        printf("3-CHIP-8 Logo\n");
-        printf("4-Random Number Test\n");
-        printf("5-Space Invaders\n");
-        printf("6-Pong\n");
+        for(int i = 0; i < total; i++){
+            printf("%d: %s\n", i+1, roms[i]);
+        }
         printf("-> ");
         scanf("%d", &op);
 
-        if(op == 1){
-            arquivo = "IBM Logo.ch8";
-        }
-        else if(op == 2){
-            arquivo = "test_opcode.ch8";
-        }
-        else if(op == 3){
-            arquivo = "Chip8 Picture.ch8";
-        }
-        else if(op == 4){
-           arquivo = "random_number_test.ch8";
-        }
-        else if(op == 5){
-            arquivo = "Space Invaders [David Winter].ch8";
-        }
-        else if(op == 6){
-            arquivo = "Pong [Paul Vervalin, 1990].ch8";
-        }
-        else{
-            printf("estranho\n");
+        if(op < 1 || op > total){
+            printf("Opcao estranho\n");
+            return 1;
         }
 
         initChip8();
-        ROM_loader(arquivo);
+        ROM_loader(roms[op - 1]);
 
         //init config options
         config_t config = {0};
